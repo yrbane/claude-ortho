@@ -4,10 +4,13 @@ import {
   GRAMMAR_COLOR,
   MAX_LENGTH,
   SPELLING_COLOR,
+  applyCorrection,
   buildCheckBody,
   maskText,
+  parseApplyToken,
   parseResponse,
   shouldCheck,
+  toCorrections,
   toDecorations,
 } from './check'
 
@@ -93,5 +96,62 @@ describe('requête et réponse LanguageTool', () => {
   test('une réponse invalide donne un résultat vide', async () => {
     expect(parseResponse('pas du json')).toEqual({})
     expect(parseResponse('{"matches":[]}')).toEqual({ matches: [] })
+  })
+})
+
+describe('toCorrections', () => {
+  test('garde le mot et les remplacements de chaque correspondance retenue', async () => {
+    const text = 'yo cé coule ma poulle'
+    const matches = [
+      { offset: 15, length: 6, rule: { id: 'FR_SPELLING_RULE' }, replacements: [{ value: 'poule' }, { value: 'poulie' }] },
+      { offset: 0, length: 2, rule: { id: 'UPPERCASE_SENTENCE_START' }, replacements: [{ value: 'Yo' }] },
+      { offset: 3, length: 2, rule: { id: 'X' } },
+    ]
+    expect(toCorrections(matches, text)).toEqual([
+      { start: 15, end: 21, word: 'poulle', replacements: ['poule', 'poulie'] },
+      { start: 3, end: 5, word: 'cé', replacements: [] },
+    ])
+  })
+})
+
+describe('parseApplyToken', () => {
+  test('lit le jeton envoyé par rustty et rien d\'autre', async () => {
+    expect(parseApplyToken('\uE000ortho\uE001poulle\uE001poule\uE0011\uE002')).toEqual({
+      word: 'poulle',
+      replacement: 'poule',
+      occurrence: 1,
+    })
+    expect(parseApplyToken('poulle')).toBe(null)
+    expect(parseApplyToken('\uE000ortho\uE001a\uE001b\uE002')).toBe(null)
+    expect(parseApplyToken('x\uE000ortho\uE001a\uE001b\uE0010\uE002')).toBe(null)
+  })
+})
+
+describe('applyCorrection', () => {
+  const corrections = [
+    { start: 3, end: 9, word: 'poulle', replacements: ['poule'] },
+    { start: 13, end: 19, word: 'poulle', replacements: ['poule'] },
+  ]
+
+  test('remplace l\'occurrence visée et déplace le curseur situé après', async () => {
+    const text = 'ma poulle et poulle là'
+    expect(applyCorrection(text, 22, corrections, { word: 'poulle', replacement: 'poule', occurrence: 1 })).toEqual({
+      text: 'ma poulle et poule là',
+      cursor: 21,
+    })
+    expect(applyCorrection(text, 5, corrections, { word: 'poulle', replacement: 'poule', occurrence: 0 })).toEqual({
+      text: 'ma poule et poulle là',
+      cursor: 8,
+    })
+    expect(applyCorrection(text, 1, corrections, { word: 'poulle', replacement: 'poule', occurrence: 0 })?.cursor).toBe(1)
+  })
+
+  test('retombe sur le texte quand la liste des corrections est périmée', async () => {
+    const text = 'ma poulle et poulle là'
+    expect(applyCorrection(text, 0, [], { word: 'poulle', replacement: 'poule', occurrence: 1 })?.text).toBe(
+      'ma poulle et poule là',
+    )
+    expect(applyCorrection(text, 0, [], { word: 'absent', replacement: 'x', occurrence: 0 })).toBe(null)
+    expect(applyCorrection(text, 0, [], { word: 'poulle', replacement: 'x', occurrence: 5 })).toBe(null)
   })
 })

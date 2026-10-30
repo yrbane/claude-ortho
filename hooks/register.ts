@@ -2,7 +2,17 @@
 // dans la zone de saisie, grâce à un serveur LanguageTool local lancé à la demande.
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import { buildCheckBody, maskText, parseResponse, shouldCheck, toDecorations } from './check'
+import {
+  type Correction,
+  applyCorrection,
+  buildCheckBody,
+  maskText,
+  parseApplyToken,
+  parseResponse,
+  shouldCheck,
+  toCorrections,
+  toDecorations,
+} from './check'
 import { createDiagnostics, formatDiagnostics } from './diagnostics'
 
 const PORT = 8099
@@ -18,6 +28,8 @@ type ServerState = 'unknown' | 'starting' | 'ready' | 'failed'
 const server: { state: ServerState } = { state: 'unknown' }
 let pending: Timer | undefined
 let lastDraft = ''
+// Les correspondances du dernier brouillon vérifié : ce qu'un jeton de rustty vise
+let corrections: Correction[] = []
 const diag = createDiagnostics()
 
 async function isUp($: EngineInterface): Promise<boolean> {
@@ -113,7 +125,9 @@ async function check($: EngineInterface, text: string): Promise<void> {
   }
   diag.lastFetch = `HTTP ${response.status}`
   if (!response.ok) return
-  const decorations = toDecorations(parseResponse(response.text).matches, text.length)
+  const matches = parseResponse(response.text).matches
+  const decorations = toDecorations(matches, text.length)
+  corrections = toCorrections(matches, text)
   try {
     // Lire la boîte avant de peindre est indispensable : le moteur n'applique la peinture
     // qu'à un module qui lit le brouillon (sans cet appel, isPainted reste false)
@@ -155,8 +169,16 @@ export const register: Register = on => {
 
   on('command.run', { command: 'ortho' }, () => ({ text: formatDiagnostics(server.state, diag) }))
 
-  // La frappe passe par prompt.edit ; historique, effacement et remplissage par prompt.change
+  // La frappe passe par prompt.edit ; historique, effacement et remplissage par prompt.change.
+  // Un jeton collé par rustty (clic sur une suggestion de son infobulle) est consommé ici :
+  // il remplace le mot visé dans le brouillon et ne laisse rien derrière lui.
   on('prompt.edit', async ($, e, next) => {
+    const token = parseApplyToken(e.inputText)
+    if (token) {
+      const box = applyCorrection(e.text, e.cursor, corrections, token) ?? { text: e.text, cursor: e.cursor }
+      schedule($, box.text)
+      return box
+    }
     const result = await next(e)
     schedule($, result.text)
     return result

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — 2026-10-30 · « Correction au survol dans rustty »
+
+- Le mod garde, pour chaque faute soulignée, le mot et les remplacements proposés par LanguageTool (`toCorrections`).
+- Jeton de correction : quand le terminal [rustty](https://github.com/yrbane/rustty) colle `U+E000 ortho U+E001 mot U+E001 remplacement U+E001 rang U+E002` (clic sur une suggestion de son infobulle au survol du souligné), le hook `prompt.edit` le consomme sans rien laisser dans le brouillon, remplace l'occurrence visée (par la liste des corrections, sinon par recherche du mot entier dans le texte), replace le curseur et relance une vérification.
+- Tests : logique pure du jeton et de l'application, et chaîne complète frappe → peinture → jeton → brouillon corrigé.
+
 ## 0.1.0 — 2026-10-30 · « Soulignés orthographe et grammaire dans la saisie »
 
 - Souligné rouge pour les fautes d'orthographe, bleu pour la grammaire, pendant la frappe (anti-rebond 450 ms).

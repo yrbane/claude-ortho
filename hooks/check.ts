@@ -6,7 +6,19 @@ export type LtMatch = {
   offset: number
   length: number
   rule: { id: string; issueType?: string; category?: { id?: string } }
+  message?: string
+  replacements?: { value: string }[]
 }
+
+// Une correspondance retenue, avec le mot fautif et ce que LanguageTool propose à la place
+export type Correction = { start: number; end: number; word: string; replacements: string[] }
+
+// Ce que rustty envoie quand une suggestion est cliquée dans son infobulle
+export type ApplyToken = { word: string; replacement: string; occurrence: number }
+
+// Jeton : U+E000 "ortho" U+E001 mot U+E001 remplacement U+E001 rang U+E002
+// (contrat décrit dans rustty, docs/superpowers/specs/2026-10-30-spell-popup-design.md)
+const APPLY_TOKEN = /^\uE000ortho\uE001([^\uE000-\uE002]*)\uE001([^\uE000-\uE002]*)\uE001(\d+)\uE002$/u
 
 export type LtResponse = { matches?: LtMatch[] }
 
@@ -64,6 +76,15 @@ export function parseResponse(json: string): LtResponse {
   }
 }
 
+// Les correspondances retenues pour la peinture, dans l'ordre de LanguageTool
+function retained(matches: readonly LtMatch[] | undefined, textLength: number): LtMatch[] {
+  return (matches ?? []).filter(match => {
+    if (IGNORED_RULES.has(match.rule.id)) return false
+    const end = match.offset + match.length
+    return match.offset >= 0 && end <= textLength && end > match.offset
+  })
+}
+
 function isSpelling(match: LtMatch): boolean {
   return match.rule.issueType === 'misspelling' || match.rule.category?.id === 'TYPOS'
 }
@@ -72,18 +93,59 @@ export function toDecorations(
   matches: readonly LtMatch[] | undefined,
   textLength: number,
 ): PromptDecoration[] {
-  const decorations: PromptDecoration[] = []
-  for (const match of matches ?? []) {
-    if (IGNORED_RULES.has(match.rule.id)) continue
-    const start = match.offset
-    const end = match.offset + match.length
-    if (start < 0 || end > textLength || end <= start) continue
-    decorations.push({
-      start,
-      end,
-      underline: true,
-      color: isSpelling(match) ? SPELLING_COLOR : GRAMMAR_COLOR,
-    })
+  return retained(matches, textLength).map(match => ({
+    start: match.offset,
+    end: match.offset + match.length,
+    underline: true,
+    color: isSpelling(match) ? SPELLING_COLOR : GRAMMAR_COLOR,
+  }))
+}
+
+export function toCorrections(matches: readonly LtMatch[] | undefined, text: string): Correction[] {
+  return retained(matches, text.length).map(match => ({
+    start: match.offset,
+    end: match.offset + match.length,
+    word: text.slice(match.offset, match.offset + match.length),
+    replacements: (match.replacements ?? []).map(r => r.value).filter(v => v.length > 0),
+  }))
+}
+
+export function parseApplyToken(input: string): ApplyToken | null {
+  const found = APPLY_TOKEN.exec(input)
+  if (!found) return null
+  return { word: found[1] ?? '', replacement: found[2] ?? '', occurrence: Number(found[3]) }
+}
+
+// La n-ième occurrence du mot dans le texte, mot entier, quand la liste des corrections est périmée
+function nthOccurrence(text: string, word: string, n: number): { start: number; end: number } | null {
+  if (word.length === 0) return null
+  let from = 0
+  let seen = 0
+  for (;;) {
+    const start = text.indexOf(word, from)
+    if (start < 0) return null
+    const end = start + word.length
+    const whole = !/[\p{L}\p{N}]$/u.test(text.slice(0, start)) && !/^[\p{L}\p{N}]/u.test(text.slice(end))
+    if (whole && seen++ === n) return { start, end }
+    from = start + 1
   }
-  return decorations
+}
+
+// Applique le remplacement demandé par le jeton : d'abord sur la correspondance visée,
+// sinon sur l'occurrence du mot dans le texte ; null si rien ne correspond
+export function applyCorrection(
+  text: string,
+  cursor: number,
+  corrections: readonly Correction[],
+  token: ApplyToken,
+): { text: string; cursor: number } | null {
+  const target =
+    corrections.filter(c => c.word === token.word)[token.occurrence] ??
+    nthOccurrence(text, token.word, token.occurrence)
+  if (!target) return null
+  const replaced = text.slice(0, target.start) + token.replacement + text.slice(target.end)
+  let moved = cursor
+  if (cursor >= target.end) moved = cursor + token.replacement.length - (target.end - target.start)
+  else if (cursor > target.start) moved = target.start + token.replacement.length
+  return { text: replaced, cursor: moved }
 }
