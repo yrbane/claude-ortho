@@ -11,7 +11,7 @@ Purement visuel : le texte n'est jamais modifié et rien n'est ajouté au messag
 
 1. À l'ouverture de la session, le mod cherche un serveur [LanguageTool](https://languagetool.org) sur `127.0.0.1:8099`. S'il n'y en a pas, il en lance un (`languagetool --http --port 8099`) qui vit le temps de la session.
 2. À chaque changement du brouillon, après 450 ms sans frappe, le texte est envoyé au serveur local (`/v2/check`, langue détectée automatiquement, variante anglaise `en-US`).
-3. Les correspondances sont converties en soulignés colorés via `$.prompt.paint`.
+3. Les correspondances sont converties en soulignés colorés via `$.prompt.paint`, après une lecture de la boîte par `$.prompt.read` : sans cette lecture, le moteur répond `isPainted: false` et ne dessine rien (piège rencontré en 0.1.0).
 
 Ne sont pas corrigés : commandes `/`, `!` et notes `#`, blocs et code en ligne, URL, chemins, mentions `@fichier`, identifiants `snake_case`, `camelCase` et mélanges lettres/chiffres. Les règles « majuscule en début de phrase » et « point final » sont ignorées, trop bruyantes dans un chat.
 

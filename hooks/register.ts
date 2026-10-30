@@ -115,8 +115,18 @@ async function check($: EngineInterface, text: string): Promise<void> {
   if (!response.ok) return
   const decorations = toDecorations(parseResponse(response.text).matches, text.length)
   try {
+    // Lire la boîte avant de peindre est indispensable : le moteur n'applique la peinture
+    // qu'à un module qui lit le brouillon (sans cet appel, isPainted reste false)
+    const box = await $.prompt.read()
     const painted = await $.prompt.paint({ text, decorations })
-    diag.lastPaint = `${decorations.length} décoration(s), isPainted=${String(painted.isPainted)}`
+    diag.lastPaint = [
+      `${decorations.length} décoration(s)`,
+      `isPainted=${String(painted.isPainted)}`,
+      `boîte lue=${box.text === text ? 'identique' : `différente (${box.text.length} vs ${text.length})`}`,
+      `boîte rendue=${painted.text.length} car.`,
+    ].join(', ')
+    // Le brouillon a bougé pendant la requête : on recalcule sur ce qu'il contient vraiment
+    if (!painted.isPainted && box.text !== text && shouldCheck(box.text)) schedule($, box.text)
   } catch (error) {
     diag.lastError = `paint : ${String(error)}`
   }

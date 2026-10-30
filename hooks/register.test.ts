@@ -23,6 +23,7 @@ test('une pause de frappe peint les fautes du brouillon', async ($, on) => {
     const text = e.url.endsWith('/v2/check') ? LT_RESPONSE : '[]'
     return { value: { status: 200, ok: true, headers: {}, text } }
   })
+  on('prompt.read', () => ({ value: { text: 'lé fote ici', cursor: 11 } }))
   on('prompt.paint', (_, e) => {
     painted.push(e)
     const text = e.text ?? ''
