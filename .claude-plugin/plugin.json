@@ -1,0 +1,7 @@
+{
+  "name": "ortho",
+  "version": "0.1.0",
+  "description": "Souligne dans la zone de saisie les fautes d'orthographe (rouge) et de grammaire (bleu) via LanguageTool local",
+  "author": { "name": "yrbane" },
+  "license": "MIT"
+}
