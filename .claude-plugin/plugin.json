@@ -1,6 +1,6 @@
 {
   "name": "ortho",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Souligne dans la zone de saisie les fautes d'orthographe (rouge) et de grammaire (bleu) via LanguageTool local ; dans rustty, un clic sur une suggestion de l'infobulle corrige le mot",
   "author": { "name": "yrbane" },
   "license": "MIT"

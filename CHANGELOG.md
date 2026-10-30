@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-10-30 · « Dépôt public et installation en une ligne »
+
+- Dépôt rendu public ; `.claude-plugin/marketplace.json` fait du dépôt sa propre place de marché : `/plugin install ortho --marketplace yrbane/claude-ortho`.
+- README : ligne d'installation depuis GitHub, clone réservé au développement, capture d'écran de l'infobulle dans rustty.
+
 ## 0.2.0 — 2026-10-30 · « Correction au survol dans rustty »
 
 - Le mod garde, pour chaque faute soulignée, le mot et les remplacements proposés par LanguageTool (`toCorrections`).

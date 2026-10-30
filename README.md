@@ -15,6 +15,8 @@ Purement visuel : le texte n'est jamais modifié et rien n'est ajouté au messag
 
 Ne sont pas corrigés : commandes `/`, `!` et notes `#`, blocs et code en ligne, URL, chemins, mentions `@fichier`, identifiants `snake_case`, `camelCase` et mélanges lettres/chiffres. Les règles « majuscule en début de phrase » et « point final » sont ignorées, trop bruyantes dans un chat.
 
+![ortho dans rustty : soulignés rouge et bleu dans la saisie, infobulle de correction au survol de « poulle » avec poule, poulie, poulet](https://yrbane.github.io/shots/ortho.webp)
+
 ## Corrections au survol, avec rustty
 
 Le moteur de Claude Code ne transmet aucun événement de souris sur la zone de saisie à un mod : le survol vient donc du terminal. Dans [rustty](https://github.com/yrbane/rustty) (à partir de 0.1.0-alpha.134), poser la souris sur un mot souligné ouvre une infobulle avec le message de LanguageTool et ses suggestions ; un clic sur l'une d'elles la colle dans le terminal sous forme d'un jeton (`U+E000 ortho U+E001 mot U+E001 remplacement U+E001 rang U+E002`) que ce mod consomme dans `prompt.edit` : le mot visé est remplacé dans le brouillon, le curseur replacé, et rien du jeton ne reste. Le rang distingue les occurrences d'un même mot fautif. Contrat détaillé dans la spec de rustty, `docs/superpowers/specs/2026-10-30-spell-popup-design.md`.
@@ -26,6 +28,14 @@ Dans un autre terminal, rien ne change : les soulignés restent purement visuels
 Affiche l'état interne du correcteur : état du serveur LanguageTool, nombre d'éditions vues, dernière requête, dernière peinture, dernière erreur. C'est le premier réflexe quand rien ne se souligne.
 
 ## Installation
+
+Depuis GitHub, à l'invite d'une session Claude Code (`y` pour ajouter la place de marché, puis la portée) :
+
+```
+/plugin install ortho --marketplace yrbane/claude-ortho
+```
+
+Depuis un clone, pour développer :
 
 ```
 git clone git@github.com:yrbane/claude-ortho.git ~/Dev/claude-ortho
