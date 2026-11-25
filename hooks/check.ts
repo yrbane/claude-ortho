@@ -149,3 +149,10 @@ export function applyCorrection(
   else if (cursor > target.start) moved = target.start + token.replacement.length
   return { text: replaced, cursor: moved }
 }
+
+// Le PID du processus qui écoute, dans une ligne de `ss -ltnp` (`users:(("java",pid=7432,fd=151))`) ;
+// null si l'outil manque, ne dit rien ou que le port est libre
+export function parseListenerPid(ssOutput: string): number | null {
+  const match = /pid=(\d+)/.exec(ssOutput)
+  return match ? Number(match[1]) : null
+}

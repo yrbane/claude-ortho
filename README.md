@@ -9,8 +9,8 @@ Purement visuel : le texte n'est jamais modifié et rien n'est ajouté au messag
 
 ## Fonctionnement
 
-1. À l'ouverture de la session, le mod cherche un serveur [LanguageTool](https://languagetool.org) sur `127.0.0.1:8099`. S'il n'y en a pas, il en lance un (`languagetool --http --port 8099`) qui vit le temps de la session.
-2. À chaque changement du brouillon, après 450 ms sans frappe, le texte est envoyé au serveur local (`/v2/check`, langue détectée automatiquement, variante anglaise `en-US`).
+1. À l'ouverture de la session, le mod sonde un serveur [LanguageTool](https://languagetool.org) sur `127.0.0.1:8099` (5 s au plus). S'il n'y en a pas, il en lance un (`languagetool --http --port 8099`, sortie vers `/dev/null`) qui vit le temps de la session. Si quelque chose écoute sans répondre, il ne lance rien et le signale (voir Dépannage).
+2. À chaque changement du brouillon, après 450 ms sans frappe, le texte est envoyé au serveur local (`/v2/check`, langue détectée automatiquement, variante anglaise `en-US`, 10 s au plus).
 3. Les correspondances sont converties en soulignés colorés via `$.prompt.paint`, après une lecture de la boîte par `$.prompt.read` : sans cette lecture, le moteur répond `isPainted: false` et ne dessine rien (piège rencontré en 0.1.0).
 
 Ne sont pas corrigés : commandes `/`, `!` et notes `#`, blocs et code en ligne, URL, chemins, mentions `@fichier`, identifiants `snake_case`, `camelCase` et mélanges lettres/chiffres. Les règles « majuscule en début de phrase » et « point final » sont ignorées, trop bruyantes dans un chat.
@@ -26,6 +26,12 @@ Dans un autre terminal, rien ne change : les soulignés restent purement visuels
 ## Commande `/ortho`
 
 Affiche l'état interne du correcteur : état du serveur LanguageTool, nombre d'éditions vues, dernière requête, dernière peinture, dernière erreur. C'est le premier réflexe quand rien ne se souligne.
+
+## Dépannage
+
+Plus rien ne se souligne, et `/ortho` indique `serveur LanguageTool : failed` avec « le processus N occupe le port 8099 sans répondre » : un serveur gelé tient le port. Cause typique : une autre session Claude Code, qui avait lancé LanguageTool, a été suspendue avec Ctrl+Z ; son serveur, dans le même groupe de processus, est gelé avec elle, et toutes les sessions se branchent dessus. Deux remèdes : reprendre cette session (`fg`), ou tuer le serveur (`kill -9 N`) ; le mod en relance un neuf dans les 30 s. Depuis 0.2.2, la sortie du serveur ne passe plus par Claude, donc une session suspendue ne bloque plus la JVM sur une écriture ; mais Ctrl+Z la gèle toujours avec la session qui l'a lancée.
+
+Toute requête est bornée (sonde 5 s, vérification 10 s) : un serveur muet rend le mod indisponible, jamais bloqué.
 
 ## Installation
 

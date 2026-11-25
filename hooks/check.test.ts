@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
+  parseListenerPid,
   GRAMMAR_COLOR,
   MAX_LENGTH,
   SPELLING_COLOR,
@@ -153,5 +154,17 @@ describe('applyCorrection', () => {
     )
     expect(applyCorrection(text, 0, [], { word: 'absent', replacement: 'x', occurrence: 0 })).toBe(null)
     expect(applyCorrection(text, 0, [], { word: 'poulle', replacement: 'x', occurrence: 5 })).toBe(null)
+  })
+})
+
+describe('parseListenerPid', () => {
+  test('lit le PID du processus qui écoute dans la sortie de ss', () => {
+    const line = 'LISTEN 51 50 [::ffff:127.0.0.1]:8099 *:* users:(("java",pid=7432,fd=151))'
+    expect(parseListenerPid(line)).toBe(7432)
+  })
+
+  test('null sans PID (autre OS, port libre, droits insuffisants)', () => {
+    expect(parseListenerPid('')).toBe(null)
+    expect(parseListenerPid('LISTEN 0 50 127.0.0.1:8099 0.0.0.0:*')).toBe(null)
   })
 })

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 — 2026-11-25 · « Un serveur gelé ne bloque plus le mod »
+
+- Cause corrigée : une session Claude Code suspendue (Ctrl+Z) gelait le serveur LanguageTool qu'elle avait lancé ; le port 8099 restait pris par un processus qui acceptait les connexions sans répondre, et toutes les sessions, qui le réutilisaient, attendaient indéfiniment : plus aucun souligné.
+- Sonde et vérification bornées (5 s et 10 s) par une course entre `$.http.fetch` et l'horloge du moteur, qui n'offre pas de délai maximal.
+- Port occupé par un serveur muet : le mod n'en lance pas un autre par-dessus, affiche « le processus N occupe le port 8099 sans répondre » (PID via `ss -ltnp` quand il existe) et l'écrit dans `/ortho` avec le remède ; nouvel essai 30 s plus tard.
+- Serveur lancé via `sh -c 'exec languagetool … >/dev/null 2>&1'` : sa sortie ne passe plus par Claude, une session qui cesse de la lire ne bloque plus la JVM sur une écriture.
+- Tests : `parseListenerPid`, et le scénario complet d'un serveur qui ne répond pas (toast, diagnostic, aucun lancement ni vérification).
+- README : section Dépannage.
+
 ## 0.2.1 — 2026-10-30 · « Dépôt public et installation en une ligne »
 
 - Dépôt rendu public ; `.claude-plugin/marketplace.json` fait du dépôt sa propre place de marché : `/plugin install ortho --marketplace yrbane/claude-ortho`.

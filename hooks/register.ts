@@ -1,6 +1,6 @@
 // Mod « ortho » : souligne pendant la frappe les fautes d'orthographe (rouge) et de grammaire (bleu)
 // dans la zone de saisie, grâce à un serveur LanguageTool local lancé à la demande.
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, HttpResponse, Register, Timer } from 'claude-code'
 
 import {
   type Correction,
@@ -8,6 +8,7 @@ import {
   buildCheckBody,
   maskText,
   parseApplyToken,
+  parseListenerPid,
   parseResponse,
   shouldCheck,
   toCorrections,
@@ -21,8 +22,13 @@ const DEBOUNCE_MS = 450
 const PROBE_EVERY_MS = 1000
 const PROBE_GIVE_UP_MS = 90_000
 const RETRY_AFTER_FAILURE_MS = 30_000
+// Au-delà, un serveur qui a accepté la connexion sans répondre est tenu pour gelé
+const PROBE_TIMEOUT_MS = 5000
+const CHECK_TIMEOUT_MS = 10_000
 
 type ServerState = 'unknown' | 'starting' | 'ready' | 'failed'
+// Ce que dit la sonde : le serveur répond, rien n'écoute, ou quelque chose écoute sans répondre
+type Probe = 'up' | 'down' | 'silent'
 
 // État du module, remis à zéro à chaque rechargement (ce qui relance la sonde du serveur)
 const server: { state: ServerState } = { state: 'unknown' }
@@ -32,32 +38,79 @@ let lastDraft = ''
 let corrections: Correction[] = []
 const diag = createDiagnostics()
 
-async function isUp($: EngineInterface): Promise<boolean> {
+// `$.http.fetch` n'a pas de délai maximal : la requête est mise en course avec l'horloge,
+// sans quoi un serveur gelé (session Claude suspendue par Ctrl+Z) suspendrait le mod avec lui
+async function fetchWithin(
+  $: EngineInterface,
+  url: string,
+  ms: number,
+  init?: Parameters<EngineInterface['http']['fetch']>[1],
+): Promise<HttpResponse | 'silent'> {
+  let deadline: Timer | undefined
+  const silence = new Promise<'silent'>(resolve => {
+    deadline = $.clock.after(ms, () => resolve('silent'))
+  })
   try {
-    return (await $.http.fetch(`${BASE_URL}/v2/languages`)).ok
-  } catch (error) {
-    diag.lastError = `sonde : ${String(error)}`
-    return false
+    return await Promise.race([$.http.fetch(url, init), silence])
+  } finally {
+    deadline?.cancel()
   }
 }
 
-function markFailed($: EngineInterface): void {
+async function probe($: EngineInterface): Promise<Probe> {
+  try {
+    const response = await fetchWithin($, `${BASE_URL}/v2/languages`, PROBE_TIMEOUT_MS)
+    if (response === 'silent') {
+      diag.lastError = `sonde : aucune réponse en ${PROBE_TIMEOUT_MS / 1000} s`
+      return 'silent'
+    }
+    return response.ok ? 'up' : 'down'
+  } catch (error) {
+    diag.lastError = `sonde : ${String(error)}`
+    return 'down'
+  }
+}
+
+// Qui tient le port : via `ss` quand il existe (Linux), sinon on ne sait pas
+async function listenerPid($: EngineInterface): Promise<number | null> {
+  try {
+    const result = await $.process.run(['ss', '-ltnpH', `sport = :${PORT}`], { timeoutMs: 3000 })
+    return parseListenerPid(result.stdout)
+  } catch {
+    return null
+  }
+}
+
+function markFailed($: EngineInterface, reason: string): void {
   server.state = 'failed'
   $.ui.status(undefined)
-  $.ui.toast('ortho : LanguageTool indisponible, nouvel essai dans 30 s')
+  $.ui.toast(`ortho : ${reason}, nouvel essai dans ${RETRY_AFTER_FAILURE_MS / 1000} s`)
   $.clock.after(RETRY_AFTER_FAILURE_MS, () => {
     server.state = 'unknown'
   })
 }
 
-// Le processus enfant s'est terminé : échec, sauf s'il a déjà été constaté
-function onChildExit($: EngineInterface): void {
-  if (server.state !== 'failed') markFailed($)
+// Le port est pris par un serveur qui ne répond pas : inutile d'en lancer un autre, on nomme le coupable
+async function markSilent($: EngineInterface): Promise<void> {
+  const pid = await listenerPid($)
+  const holder = pid === null ? 'un serveur' : `le processus ${pid}`
+  const reason = `${holder} occupe le port ${PORT} sans répondre`
+  diag.lastError = `${reason} (session Claude suspendue par Ctrl+Z ? le tuer libère le port)`
+  markFailed($, reason)
 }
 
-// Lance LanguageTool pour la vie du module ; la sortie n'importe pas, la disponibilité se sonde sur le port
+// Le processus enfant s'est terminé : échec, sauf s'il a déjà été constaté
+function onChildExit($: EngineInterface): void {
+  if (server.state !== 'failed') markFailed($, 'LanguageTool indisponible')
+}
+
+// Lance LanguageTool pour la vie du module. Sa sortie part dans /dev/null : branchée sur
+// Claude, elle bloquerait la JVM dès que la session cesse de la lire (Ctrl+Z) ; la
+// disponibilité se sonde sur le port.
 async function runChild($: EngineInterface): Promise<void> {
-  const child = $.process.spawn({ argv: ['languagetool', '--http', '--port', String(PORT)] })
+  const child = $.process.spawn({
+    argv: ['sh', '-c', 'exec languagetool --http --port "$1" >/dev/null 2>&1', 'ortho', String(PORT)],
+  })
   try {
     for await (const _chunk of child) {
       // rien à lire
@@ -68,21 +121,27 @@ async function runChild($: EngineInterface): Promise<void> {
   onChildExit($)
 }
 
-async function probeOnce($: EngineInterface, startedAt: number, probe: Timer): Promise<void> {
+async function probeOnce($: EngineInterface, startedAt: number, timer: Timer): Promise<void> {
   if (server.state !== 'starting') {
-    probe.cancel()
+    timer.cancel()
     return
   }
-  if (await isUp($)) {
-    probe.cancel()
+  const result = await probe($)
+  if (result === 'up') {
+    timer.cancel()
     server.state = 'ready'
     $.ui.status(undefined)
     void check($, lastDraft)
     return
   }
+  if (result === 'silent') {
+    timer.cancel()
+    await markSilent($)
+    return
+  }
   if ((await $.clock.now()) - startedAt > PROBE_GIVE_UP_MS) {
-    probe.cancel()
-    markFailed($)
+    timer.cancel()
+    markFailed($, 'LanguageTool indisponible')
   }
 }
 
@@ -90,15 +149,20 @@ async function probeOnce($: EngineInterface, startedAt: number, probe: Timer): P
 async function ensureServer($: EngineInterface): Promise<void> {
   if (server.state !== 'unknown') return
   server.state = 'starting'
-  if (await isUp($)) {
+  const result = await probe($)
+  if (result === 'up') {
     server.state = 'ready'
+    return
+  }
+  if (result === 'silent') {
+    await markSilent($)
     return
   }
   $.ui.status('ortho : démarrage de LanguageTool…')
   void runChild($)
   const startedAt = await $.clock.now()
-  const probe: Timer = $.clock.every(PROBE_EVERY_MS, () => {
-    void probeOnce($, startedAt, probe)
+  const timer: Timer = $.clock.every(PROBE_EVERY_MS, () => {
+    void probeOnce($, startedAt, timer)
   })
 }
 
@@ -113,13 +177,19 @@ async function check($: EngineInterface, text: string): Promise<void> {
   diag.checks += 1
   let response
   try {
-    response = await $.http.fetch(`${BASE_URL}/v2/check`, {
+    response = await fetchWithin($, `${BASE_URL}/v2/check`, CHECK_TIMEOUT_MS, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: buildCheckBody(maskText(text)),
     })
   } catch (error) {
     diag.lastError = `fetch : ${String(error)}`
+    server.state = 'unknown'
+    return
+  }
+  if (response === 'silent') {
+    // Le serveur s'est figé en cours de route : la prochaine vérification le sondera
+    diag.lastError = `vérification : aucune réponse en ${CHECK_TIMEOUT_MS / 1000} s`
     server.state = 'unknown'
     return
   }

@@ -101,3 +101,51 @@ test('le jeton de rustty remplace le mot sans toucher au brouillon autrement', a
   for (let i = 0; i < 20 && painted.length < 2; i++) await clock.advance(100)
   expect(painted[1]?.text).toBe('lé faute ici')
 })
+
+test('un serveur qui occupe le port sans répondre est signalé, PID compris, sans bloquer le mod', async ($, on) => {
+  const clock = mock.clock(on)
+  const toasts: string[] = []
+  const fetched: string[] = []
+  const ran: string[][] = []
+
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', () => ({ value: { command: 'ortho' } }))
+  // Le serveur accepte la connexion mais ne répond jamais (processus gelé)
+  on('http.fetch', (_, e) => {
+    fetched.push(e.url)
+    return new Promise(() => {})
+  })
+  on('process.run', (_, e) => {
+    ran.push([...e.argv])
+    return {
+      value: {
+        exitCode: 0,
+        stdout: 'LISTEN 51 50 [::ffff:127.0.0.1]:8099 *:* users:(("java",pid=7432,fd=151))\n',
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.status', () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 100 && toasts.length === 0; i++) await clock.advance(100)
+
+  expect(toasts).toEqual(['ortho : le processus 7432 occupe le port 8099 sans répondre, nouvel essai dans 30 s'])
+  expect(ran[0]?.[0]).toBe('ss')
+  // Pas de serveur lancé par-dessus un port occupé, et aucune vérification tentée
+  expect(fetched.every(url => url.endsWith('/v2/languages'))).toBe(true)
+  const diag = await $.command.run({
+    command: 'ortho',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
+  expect(String(diag.text)).toContain('serveur LanguageTool : failed')
+  expect(String(diag.text)).toContain('processus 7432 occupe le port 8099 sans répondre')
+})
